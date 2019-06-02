@@ -4,6 +4,7 @@
 #include <linux/i2c.h>
 #include <linux/i2c-dev.h>
 #include <stdint.h>
+#include "numbers.h"
 
 
 static const int COMMAND = 1;
@@ -141,7 +142,7 @@ int init_display(int iic)
 	buffer[16] = 0x14; // ... enabled
 
 	buffer[17] = 0x20; // Set memory addressing mode to ...
-	buffer[18] = 0x00; // ... horizontal
+	buffer[18] = 0x01; // ... vertical
 
 	buffer[19] = 0x21; // Set ...
 	buffer[20] = 0x00; // ... column start address to 0 and ...
@@ -175,14 +176,71 @@ int init_display(int iic)
 
 int fill_ram(int iic, uint8_t *ipAddr)
 {
-	int numberOfBytes = WIDTH * HEIGHT / 8;
+	int bytesHeight = HEIGHT / 8; // Height of Column in bytes
+	int numberOfBytes = WIDTH * bytesHeight;
+	
 	uint8_t buffer[numberOfBytes]; // 128 columns * 4 pages (32 pixels)
 
+	const char* ip = "192.168.1.93";
+	int numberOfDigits = strlen(ip) - 3; // IP has 3 dots, don't count these
+	int ipWidth = (numberOfDigits * 8) + (3 * 4); // 8 pixels per digit, 4 per dot
+	int startAddr = (WIDTH - ipWidth) / 2; // Offset from start of line to start writing IP
+	int endAddr = startAddr + ipWidth;
+	
+	printf("Start Address: %d, End Address: %d, IP Width, %d\n", startAddr, endAddr, ipWidth);
+	
 	int i = 0;
+	int digitBeingWritten = 0; // Index of which char in IP string is being written
+	int columnBeingWritten = 0; // Which column within the digit is being written
 
-	for(i = 0; i < numberOfBytes; i++)
+	// IP Address is written on top 2 lines, remainder is empty
+	for(i = 0; i < WIDTH; i++)
 	{
-		buffer[i] = (i & 0x02) ? 0xFF : 0x00;
+		if(i < startAddr || i >= endAddr)
+		{
+			// In dead space outside of where the IP is being written	
+			buffer[bytesHeight * i] = 0x00;
+			buffer[bytesHeight * i + 1] = 0x00;
+		}
+		else
+		{
+			// Writing the IP Address
+			if(ip[digitBeingWritten] == '.')
+			{
+				// Writing a dot
+				buffer[bytesHeight * i] = numbers [10] [columnBeingWritten];
+				buffer[bytesHeight * i + 1] = numbers [10] [columnBeingWritten + 8];
+
+				// Check if char is complete
+				if(++columnBeingWritten == 4)
+				{
+					columnBeingWritten = 0;
+					digitBeingWritten++;
+				}
+			}
+			else
+			{
+				// Writing a number
+				buffer[bytesHeight * i] = numbers [ip[digitBeingWritten] - '0'] [columnBeingWritten];
+				buffer[bytesHeight * i + 1] = numbers [ip[digitBeingWritten] - '0'] [columnBeingWritten + 8];
+
+				// Check if char is complete
+				if(++columnBeingWritten == 8)
+				{
+					columnBeingWritten = 0;
+					digitBeingWritten++;
+				}
+
+			}
+			
+		}
+
+		// Pad remainder of column with zeroes
+		int j = 2;
+		for (j=2; j < bytesHeight; j++)
+		{
+			buffer[bytesHeight * i + j] = 0x00;
+		}
 	}
 
 
